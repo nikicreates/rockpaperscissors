@@ -1,0 +1,886 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>CLASH</title>
+  <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet">
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg:     #07070f;
+      --panel:  #0c0c1a;
+      --cyan:   #00e5cc;
+      --pink:   #ff2563;
+      --gold:   #ffc744;
+      --text:   #dde4f0;
+      --muted:  #4a5568;
+      --border: #161625;
+    }
+
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: 'Space Mono', monospace;
+      min-height: 100svh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      overflow: hidden;
+      position: relative;
+    }
+
+    /* Scanlines — highest z so they coat everything */
+    body::after {
+      content: '';
+      position: fixed;
+      inset: 0;
+      background: repeating-linear-gradient(
+        0deg,
+        transparent 0px,
+        transparent 3px,
+        rgba(0,0,0,0.06) 3px,
+        rgba(0,0,0,0.06) 4px
+      );
+      pointer-events: none;
+      z-index: 900;
+    }
+
+    /* Ambient glow */
+    .bg-glow {
+      position: fixed;
+      inset: 0;
+      background:
+        radial-gradient(ellipse 60% 40% at 20% 50%, rgba(0, 229, 204, 0.04) 0%, transparent 60%),
+        radial-gradient(ellipse 60% 40% at 80% 50%, rgba(255, 37, 99, 0.04) 0%, transparent 60%);
+      pointer-events: none;
+      z-index: 0;
+    }
+
+    /* Confetti canvas */
+    #confetti {
+      position: fixed;
+      top: 0; left: 0;
+      pointer-events: none;
+      z-index: 600;
+    }
+
+    /* ── MATCH OVERLAY ── */
+    .match-overlay {
+      position: fixed;
+      inset: 0;
+      background: rgba(7, 7, 15, 0.88);
+      backdrop-filter: blur(10px);
+      -webkit-backdrop-filter: blur(10px);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      z-index: 500;
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 0.4s ease;
+    }
+
+    .match-overlay.show {
+      opacity: 1;
+      pointer-events: all;
+    }
+
+    .match-card {
+      text-align: center;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 0.7rem;
+      padding: 2.5rem clamp(2rem, 6vw, 3.5rem);
+      background: var(--panel);
+      border: 1.5px solid var(--border);
+      border-radius: 20px;
+      transform: scale(0.85) translateY(30px);
+      opacity: 0;
+      transition: transform 0.45s cubic-bezier(0.175, 0.885, 0.32, 1.275) 0.1s,
+                  opacity  0.35s ease 0.1s;
+    }
+
+    .match-overlay.show .match-card {
+      transform: scale(1) translateY(0);
+      opacity: 1;
+    }
+
+    .match-icon {
+      font-size: clamp(3rem, 8vw, 4.5rem);
+      line-height: 1;
+    }
+
+    .match-title {
+      font-family: 'Bebas Neue', sans-serif;
+      font-size: clamp(2.5rem, 9vw, 4.5rem);
+      letter-spacing: 0.1em;
+      line-height: 1;
+    }
+
+    .match-title.t-victory {
+      color: var(--gold);
+      text-shadow: 0 0 25px var(--gold), 0 0 55px rgba(255, 199, 68, 0.25);
+    }
+
+    .match-title.t-defeat {
+      color: var(--pink);
+      text-shadow: 0 0 25px var(--pink);
+    }
+
+    .match-sub {
+      font-size: 0.65rem;
+      letter-spacing: 0.3em;
+      color: var(--muted);
+      text-transform: uppercase;
+    }
+
+    .restart-btn {
+      margin-top: 0.4rem;
+      font-family: 'Bebas Neue', sans-serif;
+      font-size: 1.15rem;
+      letter-spacing: 0.2em;
+      color: var(--bg);
+      background: var(--cyan);
+      border: none;
+      border-radius: 10px;
+      padding: 0.7rem 2.5rem;
+      cursor: pointer;
+      box-shadow: 0 4px 20px rgba(0, 229, 204, 0.3);
+      transition: transform 0.15s, box-shadow 0.15s;
+    }
+
+    .restart-btn:hover {
+      transform: translateY(-3px);
+      box-shadow: 0 8px 30px rgba(0, 229, 204, 0.45);
+    }
+
+    .restart-btn:active {
+      transform: scale(0.96);
+    }
+
+    /* ── GAME ── */
+    .game {
+      width: min(680px, 100vw);
+      padding: clamp(1rem, 3vw, 2rem);
+      display: flex;
+      flex-direction: column;
+      gap: clamp(0.75rem, 2vh, 1.5rem);
+      align-items: center;
+      position: relative;
+      z-index: 1;
+    }
+
+    /* ── HEADER ── */
+    .header { text-align: center; }
+
+    .title {
+      font-family: 'Bebas Neue', sans-serif;
+      font-size: clamp(3.5rem, 10vw, 6rem);
+      line-height: 0.9;
+      color: var(--cyan);
+      text-shadow:
+        0 0 15px var(--cyan),
+        0 0 35px rgba(0, 229, 204, 0.35),
+        0 0 70px rgba(0, 229, 204, 0.12);
+      letter-spacing: 0.05em;
+      animation: neon-flicker 8s infinite;
+    }
+
+    .tagline {
+      font-size: 0.55rem;
+      letter-spacing: 0.45em;
+      color: var(--muted);
+      margin-top: 0.3rem;
+      text-transform: uppercase;
+    }
+
+    @keyframes neon-flicker {
+      0%, 94%, 96%, 98%, 100% { opacity: 1; }
+      95%  { opacity: 0.75; }
+      97%  { opacity: 0.9; }
+      99%  { opacity: 0.7; }
+    }
+
+    /* ── ARENA ── */
+    .arena {
+      display: grid;
+      grid-template-columns: 1fr auto 1fr;
+      align-items: center;
+      gap: clamp(0.5rem, 2vw, 1.5rem);
+      width: 100%;
+    }
+
+    .fighter {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 0.6rem;
+    }
+
+    .fighter-name {
+      font-size: 0.6rem;
+      letter-spacing: 0.35em;
+      color: var(--muted);
+      text-transform: uppercase;
+    }
+
+    .choice-card {
+      width: clamp(90px, 18vw, 130px);
+      height: clamp(90px, 18vw, 130px);
+      border-radius: 16px;
+      border: 1.5px solid var(--border);
+      background: var(--panel);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: clamp(2.5rem, 6vw, 3.5rem);
+      position: relative;
+      overflow: hidden;
+      transition: border-color 0.3s, box-shadow 0.3s, opacity 0.3s;
+    }
+
+    .choice-card::before {
+      content: '';
+      position: absolute;
+      inset: 0;
+      background: linear-gradient(135deg, rgba(255,255,255,0.03) 0%, transparent 50%);
+      pointer-events: none;
+    }
+
+    .fighter.player .choice-card { border-color: rgba(0, 229, 204, 0.15); }
+    .fighter.cpu    .choice-card { border-color: rgba(255, 37, 99, 0.15); }
+
+    .choice-card.state-winner {
+      border-color: var(--gold) !important;
+      box-shadow:
+        0 0 20px rgba(255, 199, 68, 0.25),
+        0 0 40px rgba(255, 199, 68, 0.08),
+        inset 0 0 15px rgba(255, 199, 68, 0.05);
+    }
+
+    .choice-card.state-loser {
+      opacity: 0.4;
+      border-color: rgba(255, 37, 99, 0.08) !important;
+    }
+
+    .choice-emoji { display: block; line-height: 1; }
+
+    .choice-card.do-reveal .choice-emoji {
+      animation: pop-in 0.45s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards;
+    }
+
+    @keyframes pop-in {
+      0%   { transform: scale(0) rotate(-25deg); opacity: 0; }
+      65%  { transform: scale(1.2) rotate(5deg);  opacity: 1; }
+      100% { transform: scale(1)   rotate(0deg);  opacity: 1; }
+    }
+
+    /* ── PIPS ── */
+    .pips {
+      display: flex;
+      gap: 7px;
+    }
+
+    .pip {
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      background: transparent;
+      border: 1.5px solid var(--muted);
+      transition: background 0.25s, border-color 0.25s, box-shadow 0.25s;
+    }
+
+    .fighter.player .pip.filled {
+      background: var(--cyan);
+      border-color: var(--cyan);
+      box-shadow: 0 0 7px var(--cyan);
+      animation: pip-pop 0.35s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+    }
+
+    .fighter.cpu .pip.filled {
+      background: var(--pink);
+      border-color: var(--pink);
+      box-shadow: 0 0 7px var(--pink);
+      animation: pip-pop 0.35s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+    }
+
+    @keyframes pip-pop {
+      0%   { transform: scale(0); }
+      70%  { transform: scale(1.4); }
+      100% { transform: scale(1); }
+    }
+
+    /* VS column */
+    .vs-col {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 0.3rem;
+    }
+
+    .vs-badge {
+      font-family: 'Bebas Neue', sans-serif;
+      font-size: clamp(1.2rem, 3vw, 1.8rem);
+      color: var(--gold);
+      text-shadow: 0 0 12px var(--gold);
+      letter-spacing: 0.05em;
+    }
+
+    .vs-sub {
+      font-size: 0.42rem;
+      letter-spacing: 0.28em;
+      color: var(--muted);
+      text-transform: uppercase;
+      white-space: nowrap;
+    }
+
+    /* ── DIVIDER ── */
+    .rule {
+      width: 100%;
+      height: 1px;
+      background: linear-gradient(90deg, transparent 0%, var(--border) 20%, var(--border) 80%, transparent 100%);
+    }
+
+    /* ── RESULT ── */
+    .result-zone {
+      min-height: 2.5rem;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .result-text {
+      font-family: 'Bebas Neue', sans-serif;
+      font-size: clamp(1.4rem, 4.5vw, 2.2rem);
+      letter-spacing: 0.12em;
+      opacity: 0;
+      transform: translateY(8px);
+      transition: opacity 0.25s, transform 0.25s;
+    }
+
+    .result-text.visible      { opacity: 1; transform: translateY(0); }
+    .result-text.t-win        { color: var(--gold); text-shadow: 0 0 18px var(--gold); }
+    .result-text.t-lose       { color: var(--pink); text-shadow: 0 0 18px var(--pink); }
+    .result-text.t-draw       { color: var(--muted); }
+    .result-text.t-idle       {
+      color: var(--muted);
+      font-size: clamp(0.75rem, 2vw, 0.95rem);
+      letter-spacing: 0.3em;
+    }
+
+    /* Streak */
+    .streak-line {
+      font-size: 0.58rem;
+      letter-spacing: 0.3em;
+      color: var(--gold);
+      min-height: 1rem;
+      opacity: 0;
+      transition: opacity 0.3s;
+      text-transform: uppercase;
+    }
+
+    .streak-line.show { opacity: 1; }
+
+    /* ── BUTTONS ── */
+    .controls {
+      display: flex;
+      gap: clamp(0.5rem, 1.5vw, 0.9rem);
+      width: 100%;
+      justify-content: center;
+    }
+
+    .choice-btn {
+      flex: 1;
+      max-width: 150px;
+      aspect-ratio: 1;
+      background: var(--panel);
+      border: 1.5px solid var(--border);
+      border-radius: 14px;
+      cursor: pointer;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 0.4rem;
+      position: relative;
+      overflow: hidden;
+      transition: transform 0.18s, border-color 0.18s, box-shadow 0.18s;
+      -webkit-tap-highlight-color: transparent;
+    }
+
+    .choice-btn::after {
+      content: '';
+      position: absolute;
+      inset: 0;
+      background: radial-gradient(circle at center, rgba(0, 229, 204, 0.12) 0%, transparent 65%);
+      opacity: 0;
+      transition: opacity 0.25s;
+    }
+
+    .choice-btn:hover::after { opacity: 1; }
+
+    .choice-btn:hover {
+      border-color: rgba(0, 229, 204, 0.5);
+      transform: translateY(-5px);
+      box-shadow: 0 10px 28px rgba(0, 229, 204, 0.15), 0 0 0 1px rgba(0, 229, 204, 0.08);
+    }
+
+    .choice-btn:active {
+      transform: translateY(-2px) scale(0.96);
+      transition-duration: 0.08s;
+    }
+
+    .choice-btn.locked {
+      pointer-events: none;
+      opacity: 0.4;
+    }
+
+    .btn-icon {
+      font-size: clamp(1.8rem, 4.5vw, 2.2rem);
+      transition: transform 0.18s;
+      position: relative;
+      z-index: 1;
+    }
+
+    .choice-btn:hover .btn-icon { transform: scale(1.2); }
+
+    .btn-name {
+      font-size: 0.55rem;
+      letter-spacing: 0.3em;
+      color: var(--muted);
+      text-transform: uppercase;
+      position: relative;
+      z-index: 1;
+    }
+
+    /* ── FLASH OVERLAY ── */
+    #flash {
+      position: fixed;
+      inset: 0;
+      pointer-events: none;
+      z-index: 99;
+      opacity: 0;
+    }
+
+    @keyframes flash-win-anim  {
+      0%   { background: rgba(255, 199, 68, 0.12); opacity: 1; }
+      100% { opacity: 0; }
+    }
+
+    @keyframes flash-lose-anim {
+      0%   { background: rgba(255, 37, 99, 0.1); opacity: 1; }
+      100% { opacity: 0; }
+    }
+
+    #flash.f-win  { animation: flash-win-anim  0.6s ease forwards; }
+    #flash.f-lose { animation: flash-lose-anim 0.5s ease forwards; }
+
+    /* ── SHAKE ── */
+    @keyframes shake-anim {
+      0%   { transform: translateX(0); }
+      15%  { transform: translateX(-10px); }
+      35%  { transform: translateX(9px); }
+      55%  { transform: translateX(-7px); }
+      75%  { transform: translateX(5px); }
+      100% { transform: translateX(0); }
+    }
+
+    .shaking { animation: shake-anim 0.42s ease forwards; }
+
+  </style>
+</head>
+<body>
+
+<canvas id="confetti"></canvas>
+<div class="bg-glow"></div>
+<div id="flash"></div>
+
+<div class="match-overlay" id="matchOverlay">
+  <div class="match-card">
+    <div class="match-icon"  id="matchIcon"></div>
+    <div class="match-title" id="matchTitle"></div>
+    <div class="match-sub"   id="matchSub"></div>
+    <button class="restart-btn" onclick="restartMatch()">PLAY AGAIN</button>
+  </div>
+</div>
+
+<div class="game" id="game">
+
+  <header class="header">
+    <h1 class="title">CLASH</h1>
+    <p class="tagline">Rock · Paper · Scissors</p>
+  </header>
+
+  <div class="arena">
+    <div class="fighter player">
+      <span class="fighter-name">You</span>
+      <div class="choice-card" id="pCard">
+        <span class="choice-emoji" id="pEmoji">—</span>
+      </div>
+      <div class="pips" id="pPips">
+        <span class="pip"></span>
+        <span class="pip"></span>
+        <span class="pip"></span>
+      </div>
+    </div>
+
+    <div class="vs-col">
+      <div class="vs-badge">VS</div>
+      <div class="vs-sub">First to 3</div>
+    </div>
+
+    <div class="fighter cpu">
+      <span class="fighter-name">CPU</span>
+      <div class="choice-card" id="cCard">
+        <span class="choice-emoji" id="cEmoji">—</span>
+      </div>
+      <div class="pips" id="cPips">
+        <span class="pip"></span>
+        <span class="pip"></span>
+        <span class="pip"></span>
+      </div>
+    </div>
+  </div>
+
+  <div class="rule"></div>
+
+  <div class="result-zone">
+    <span class="result-text t-idle visible" id="result">CHOOSE YOUR WEAPON</span>
+  </div>
+
+  <div class="streak-line" id="streakLine"></div>
+
+  <div class="controls" id="controls">
+    <button class="choice-btn" onclick="play('rock')">
+      <span class="btn-icon">🪨</span>
+      <span class="btn-name">Rock</span>
+    </button>
+    <button class="choice-btn" onclick="play('paper')">
+      <span class="btn-icon">📄</span>
+      <span class="btn-name">Paper</span>
+    </button>
+    <button class="choice-btn" onclick="play('scissors')">
+      <span class="btn-icon">✂️</span>
+      <span class="btn-name">Scissors</span>
+    </button>
+  </div>
+
+</div>
+
+<script>
+  // ── AUDIO ────────────────────────────────────────────────────────────────
+  let audioCtx = null;
+
+  function getAudioCtx() {
+    if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    if (audioCtx.state === 'suspended') audioCtx.resume();
+    return audioCtx;
+  }
+
+  function tone(freq, type, startT, dur, vol = 0.25, endFreq = null) {
+    const ctx  = getAudioCtx();
+    const osc  = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+    osc.type = type;
+    osc.frequency.setValueAtTime(freq, startT);
+    if (endFreq) osc.frequency.exponentialRampToValueAtTime(endFreq, startT + dur);
+    gain.gain.setValueAtTime(vol, startT);
+    gain.gain.exponentialRampToValueAtTime(0.001, startT + dur);
+    osc.start(startT);
+    osc.stop(startT + dur + 0.01);
+  }
+
+  function playClick() {
+    const t = getAudioCtx().currentTime;
+    tone(700, 'sine', t, 0.07, 0.28, 350);
+  }
+
+  function playWin() {
+    const t = getAudioCtx().currentTime;
+    tone(440, 'sine', t,        0.15, 0.22);
+    tone(660, 'sine', t + 0.13, 0.20, 0.22);
+  }
+
+  function playLose() {
+    const t = getAudioCtx().currentTime;
+    tone(380, 'sawtooth', t, 0.35, 0.12, 170);
+  }
+
+  function playDraw() {
+    const t = getAudioCtx().currentTime;
+    tone(430, 'sine', t, 0.13, 0.16);
+  }
+
+  function playVictory() {
+    const t = getAudioCtx().currentTime;
+    // Ascending fanfare: C E G C E
+    [[262, 0], [330, 0.10], [392, 0.20], [523, 0.31], [659, 0.42]].forEach(([f, d]) => {
+      tone(f, 'sine', t + d, d === 0.42 ? 0.65 : 0.17, 0.28);
+    });
+    // Harmony underneath the last note
+    tone(392, 'sine', t + 0.31, 0.65, 0.14);
+  }
+
+  function playDefeat() {
+    const t = getAudioCtx().currentTime;
+    // Sad descending: G F# F E
+    [[392, 0], [370, 0.18], [349, 0.38], [294, 0.58]].forEach(([f, d]) => {
+      tone(f, 'sine', t + d, 0.24, 0.18);
+    });
+  }
+
+  // ── CONFETTI ─────────────────────────────────────────────────────────────
+  function launchConfetti() {
+    const canvas = document.getElementById('confetti');
+    const W = canvas.width  = window.innerWidth;
+    const H = canvas.height = window.innerHeight;
+    const ctx = canvas.getContext('2d');
+
+    const COLORS = [
+      '#00e5cc','#ff2563','#ffc744','#ff6b35',
+      '#a855f7','#3b82f6','#22c55e','#fbbf24',
+      '#f9a8d4','#ffffff','#ff9ff3','#fdba74',
+    ];
+
+    const particles = Array.from({ length: 220 }, () => ({
+      x:    Math.random() * W,
+      y:    -10 - Math.random() * 120,
+      vx:   (Math.random() - 0.5) * 5,
+      vy:   1.8 + Math.random() * 4,
+      rot:  Math.random() * Math.PI * 2,
+      rots: (Math.random() - 0.5) * 0.19,
+      color: COLORS[Math.floor(Math.random() * COLORS.length)],
+      w:    5 + Math.random() * 9,
+      h:    3 + Math.random() * 5,
+      isCircle: Math.random() < 0.25,
+    }));
+
+    let start = null;
+
+    function frame(ts) {
+      if (!start) start = ts;
+      const elapsed = ts - start;
+
+      ctx.clearRect(0, 0, W, H);
+
+      // Fade out after 3s
+      const alpha = elapsed > 3000 ? Math.max(0, 1 - (elapsed - 3000) / 1200) : 1;
+      if (alpha <= 0) { ctx.clearRect(0, 0, W, H); return; }
+
+      ctx.globalAlpha = alpha;
+      let hasAlive = false;
+
+      for (const p of particles) {
+        p.vy  += 0.11;
+        p.vy   = Math.min(p.vy, 9);
+        // gentle swaying
+        p.x   += p.vx + Math.sin(elapsed * 0.0014 + p.y * 0.007) * 0.28;
+        p.y   += p.vy;
+        p.rot += p.rots;
+        if (p.y < H + 30) hasAlive = true;
+
+        ctx.save();
+        ctx.translate(p.x, p.y);
+        ctx.rotate(p.rot);
+        ctx.fillStyle = p.color;
+        if (p.isCircle) {
+          ctx.beginPath();
+          ctx.arc(0, 0, p.w / 2, 0, Math.PI * 2);
+          ctx.fill();
+        } else {
+          ctx.fillRect(-p.w / 2, -p.h / 2, p.w, p.h);
+        }
+        ctx.restore();
+      }
+
+      ctx.globalAlpha = 1;
+      if (hasAlive && alpha > 0) requestAnimationFrame(frame);
+      else ctx.clearRect(0, 0, W, H);
+    }
+
+    requestAnimationFrame(frame);
+  }
+
+  // ── GAME STATE ───────────────────────────────────────────────────────────
+  const WIN_THRESHOLD = 3;
+  const CHOICES = ['rock', 'paper', 'scissors'];
+  const EMOJI   = { rock: '🪨', paper: '📄', scissors: '✂️' };
+  const BEATS   = { rock: 'scissors', paper: 'rock', scissors: 'paper' };
+  const MSGS    = {
+    win:  ["YOU WIN!", "FLAWLESS!", "DOMINANT!", "PERFECT!", "GOT 'EM!"],
+    lose: ["YOU LOSE", "WRECKED",   "OUCH...",   "RIP",      "TOUGH BREAK"],
+    draw: ["DRAW",     "STANDOFF",  "MIRROR MATCH", "TIED UP", "DEAD EVEN"],
+  };
+
+  let scores = [0, 0]; // [player, cpu]
+  let streak = 0;
+  let busy   = false;
+
+  const pCard       = document.getElementById('pCard');
+  const cCard       = document.getElementById('cCard');
+  const pEmoji      = document.getElementById('pEmoji');
+  const cEmoji      = document.getElementById('cEmoji');
+  const pPips       = document.getElementById('pPips');
+  const cPips       = document.getElementById('cPips');
+  const result      = document.getElementById('result');
+  const flash       = document.getElementById('flash');
+  const streakLn    = document.getElementById('streakLine');
+  const controls    = document.getElementById('controls');
+  const game        = document.getElementById('game');
+  const matchOverlay = document.getElementById('matchOverlay');
+  const matchIcon   = document.getElementById('matchIcon');
+  const matchTitle  = document.getElementById('matchTitle');
+  const matchSub    = document.getElementById('matchSub');
+
+  function pick(arr) { return arr[Math.floor(Math.random() * arr.length)]; }
+
+  function updatePips() {
+    pPips.querySelectorAll('.pip').forEach((pip, i) => pip.classList.toggle('filled', i < scores[0]));
+    cPips.querySelectorAll('.pip').forEach((pip, i) => pip.classList.toggle('filled', i < scores[1]));
+  }
+
+  function triggerReveal(card, emojiEl, symbol) {
+    card.classList.remove('do-reveal');
+    void card.offsetWidth;
+    emojiEl.textContent = symbol;
+    card.classList.add('do-reveal');
+  }
+
+  function triggerFlash(type) {
+    flash.className = '';
+    void flash.offsetWidth;
+    flash.className = type === 'win' ? 'f-win' : 'f-lose';
+  }
+
+  function setCardState(card, state) {
+    card.classList.remove('state-winner', 'state-loser');
+    if (state) card.classList.add('state-' + state);
+  }
+
+  function showResult(msg, type) {
+    result.className = 'result-text';
+    void result.offsetWidth;
+    result.textContent = msg;
+    result.className = `result-text t-${type} visible`;
+  }
+
+  function lock(on) {
+    controls.querySelectorAll('.choice-btn').forEach(b =>
+      b.classList.toggle('locked', on)
+    );
+  }
+
+  function endMatch(playerWon) {
+    // Short delay so player can see final round result before overlay
+    setTimeout(() => {
+      matchIcon.textContent = playerWon ? '🏆' : '💀';
+      matchTitle.textContent = playerWon ? 'VICTORY!' : 'DEFEATED';
+      matchTitle.className = `match-title ${playerWon ? 't-victory' : 't-defeat'}`;
+      matchSub.textContent = playerWon
+        ? `You won ${scores[0]} — ${scores[1]}`
+        : `CPU won ${scores[1]} — ${scores[0]}`;
+      matchOverlay.classList.add('show');
+      if (playerWon) {
+        launchConfetti();
+        playVictory();
+      } else {
+        playDefeat();
+      }
+    }, 900);
+  }
+
+  function restartMatch() {
+    matchOverlay.classList.remove('show');
+    scores = [0, 0];
+    streak = 0;
+    updatePips();
+    setCardState(pCard, null);
+    setCardState(cCard, null);
+    pEmoji.textContent = '—';
+    cEmoji.textContent = '—';
+    streakLn.classList.remove('show');
+    showResult('CHOOSE YOUR WEAPON', 'idle');
+    lock(false);
+    busy = false;
+  }
+
+  // ── MAIN PLAY LOOP ────────────────────────────────────────────────────────
+  function play(playerChoice) {
+    if (busy) return;
+    busy = true;
+    lock(true);
+    playClick();
+
+    setCardState(pCard, null);
+    setCardState(cCard, null);
+    result.className = 'result-text t-idle';
+
+    triggerReveal(pCard, pEmoji, EMOJI[playerChoice]);
+    cEmoji.textContent = '·';
+
+    const cpuChoice = pick(CHOICES);
+
+    setTimeout(() => {
+      triggerReveal(cCard, cEmoji, EMOJI[cpuChoice]);
+
+      setTimeout(() => {
+        const outcome =
+          playerChoice === cpuChoice ? 'draw'  :
+          BEATS[playerChoice] === cpuChoice ? 'win' : 'lose';
+
+        showResult(pick(MSGS[outcome]), outcome);
+
+        let matchOver = false;
+
+        if (outcome === 'win') {
+          scores[0]++;
+          updatePips();
+          setCardState(pCard, 'winner');
+          setCardState(cCard, 'loser');
+          triggerFlash('win');
+          playWin();
+          streak++;
+          if (streak >= 2) {
+            streakLn.textContent = `${streak}× WIN STREAK`;
+            streakLn.classList.add('show');
+          }
+          if (scores[0] >= WIN_THRESHOLD) matchOver = true;
+
+        } else if (outcome === 'lose') {
+          scores[1]++;
+          updatePips();
+          setCardState(cCard, 'winner');
+          setCardState(pCard, 'loser');
+          triggerFlash('lose');
+          playLose();
+          game.classList.add('shaking');
+          setTimeout(() => game.classList.remove('shaking'), 450);
+          streak = 0;
+          streakLn.classList.remove('show');
+          if (scores[1] >= WIN_THRESHOLD) matchOver = true;
+
+        } else {
+          playDraw();
+          streak = 0;
+          streakLn.classList.remove('show');
+        }
+
+        if (matchOver) {
+          endMatch(scores[0] >= WIN_THRESHOLD);
+          // buttons stay locked — overlay takes over
+        } else {
+          setTimeout(() => { lock(false); busy = false; }, 500);
+        }
+      }, 250);
+    }, 480);
+  }
+</script>
+
+</body>
+</html>
